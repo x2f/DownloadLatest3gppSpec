@@ -1,0 +1,2 @@
+# DownloadLatest3gppSpec
+DownloadLatest3gppSpec用于下载最新3GPP协议。
