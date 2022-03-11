@@ -4,36 +4,39 @@
 import threading
 import time
 import requests
+import zipfile
 import queue as Queue
 from pathlib import Path
 import re
 import os
 
+url_prefix = "http://www.3gpp.org/ftp/Specs/latest"
 
-Specs_latest_url = "http://www.3gpp.org/ftp/Specs/latest/Rel-16/"
+releases = [ "Rel-16", "Rel-17", "Rel-18" ] # As they appear at url_prefix location
 
-where_to_save = "D:\\3gppR16Latest\\"
+root = "D:\\xavier\\3gpp"
 
 localheaders = {'User-Agent': 'Chrome/81.0.4044.138 Safari/537.36'}
 
 class myThread (threading.Thread):
-    def __init__(self, threadID, name, queue):
+    def __init__(self, threadID, name, queue, where_to_save):
         threading.Thread.__init__(self)
         self.threadID = threadID
         self.name = name
         self.queue = queue
+        self.where_to_save = where_to_save
     def run(self):
-        print ("开始线程：" + self.name)
+        #print ("Thread started：" + self.name)
         while True:
             try:
                 url = self.queue.get(timeout=1)   
-                download_file(url)
+                download_file(url, self.where_to_save)
             except:
                 break
             
-        print ("退出线程：" + self.name)
+        #print ("Thread exited：" + self.name)
 
-def download_file(file_link):
+def download_file(file_link, where_to_save):
     if( ".zip" not in file_link) :
        return
 
@@ -41,19 +44,27 @@ def download_file(file_link):
 
     where_to_save_dir  = where_to_save + get_file.group(2)
     where_to_save_file = where_to_save + get_file.group(2) + '\\' + get_file.group(3)
+    zip_filename = get_file.group(3)
 
     get_dir  = Path(where_to_save_dir)
     get_file = Path(where_to_save_file)
+    doc_file = Path(where_to_save_file.replace('.zip','.doc'))
+    docx_file = Path(where_to_save_file.replace('.zip','.docx'))
 
-    if get_dir.is_dir() == False:
+    if not get_dir.is_dir():
         os.makedirs(where_to_save_dir)
         
-    if get_file.is_file() == False:
+    if not (doc_file.is_file() or docx_file.is_file()):
         print("download: ",file_link)
 
         r = requests.get(file_link, headers = localheaders)
         with open(where_to_save_file, 'wb') as outputfile:
             outputfile.write(r.content)
+
+        with zipfile.ZipFile(where_to_save_file, 'r') as zip_ref:
+            zip_ref.extractall(where_to_save_dir)
+        os.remove(where_to_save_file)
+
 
 def get_file_list_url(spec_url_list):
     s = requests.session()
@@ -74,12 +85,12 @@ def get_file_list_url(spec_url_list):
                 file_list.append(spec_url+"/"+file)
     return file_list
 
-def get_3gpp_url_list(Specs_latest_url):
+def get_3gpp_url_list(latest_url):
     s = requests.session()
 
     spec_url_list = []
 
-    response =s.get(Specs_latest_url,headers = localheaders)
+    response =s.get(latest_url,headers = localheaders)
         
     html = response.content.decode("utf-8")
 
@@ -92,27 +103,32 @@ def get_3gpp_url_list(Specs_latest_url):
             spec_url_list.append(file)
     return spec_url_list
 
-spec_url_list = get_3gpp_url_list(Specs_latest_url)
+for release in releases:
 
-file_list = get_file_list_url(spec_url_list)
+    print(f"Release: {release}: obtaining specs list...")
+    spec_url_list = get_3gpp_url_list(f"{url_prefix}/{release}")
+    file_list = get_file_list_url(spec_url_list)
+    file_list = [f for f in file_list if ".zip" in f]
+    print(f"Release: {release}: found {len(file_list)} specs")
 
-print(file_list)
-thread_num = 40
-# 设置队列长度
-workQueue = Queue.Queue(3000)
+    thread_num = 40
+    # Sets the queue length
+    workQueue = Queue.Queue(3000)
 
-#将url填充到队列
-for url in file_list:
-    workQueue.put(url)
+    #Populate the url into the queue
+    #download_file(file_list[1], f"{root}\\{release}\\") # test...
+    #workQueue.put(file_list[0]) # test...
+    for url in file_list:
+        workQueue.put(url)
 
-threads = []
+    threads = []
 
-for i in range(thread_num):
-    thread = myThread(i, 'Thread-%d'%(i),workQueue)
-    thread.start()
-    threads.append(thread)
+    for i in range(thread_num):
+        thread = myThread(i, 'Thread-%d'%(i), workQueue, f"{root}\\{release}\\")
+        thread.start()
+        threads.append(thread)
 
-for t in threads:
-    t.join()
+    for t in threads:
+        t.join()
 
-print ("退出主线程")
+print ("End of main thread")
